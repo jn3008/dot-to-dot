@@ -3,18 +3,17 @@ import argparse
 import matplotlib.pyplot as plt
 from dot_to_dot import get_dots
 from matplotlib.font_manager import FontProperties
-# import numpy as np
 import os
 
-custom_font = FontProperties(fname='fonts/ZCOOLKuaiLe-Regular.ttf')
+label_font = FontProperties(fname='fonts/ZCOOLKuaiLe-Regular.ttf')
 
+show_characters = False
 draw_lines = False
-# draw_lines = True
 char_fontsize = 7
-dot_size = 0.3
+dot_size = 0.5
 number_label_fontsize = 2.5
 number_label_offset_distance = 10  # Fixed offset distance
-overlap_thresh = 30
+overlap_thresh = 25 # For fixing overlapping labels
 
 if __name__ == "__main__":
   # Command-line argument parsing
@@ -79,12 +78,12 @@ if __name__ == "__main__":
   fig, ax = plt.subplots(figsize=(8, 6))
   ax.set_aspect('equal')  # Set aspect ratio to be equal to prevent squishing
 
-
   # Prepare data for plotting
   for dots_glyph in dots_word:
+    subshape_counter = 1  # Counter for subshape differentiation
     for dots in dots_glyph:
       if not dots:  # Skip empty subpaths
-          continue
+        continue
 
       # Extract x and y coordinates from the complex points
       x_coords = [dot.real for dot in dots]
@@ -98,49 +97,55 @@ if __name__ == "__main__":
       all_x_coords.extend(x_coords)
       all_y_coords.extend(y_coords)
 
-      # Prepare label data
+      # Prepare label data with subshape indicator
       for i in range(len(dots)):
-          curr_point = dots[i]
-          # Default positions for the label
-          offset_point_right = curr_point + complex(number_label_offset_distance, 0)
-          offset_point_left = curr_point - complex(number_label_offset_distance, 0)
-          offset_point_top = curr_point + complex(0, number_label_offset_distance)
-          offset_point_bottom = curr_point - complex(0, number_label_offset_distance)
+        curr_point = dots[i]
+        # Default positions for the label
+        offset_point_right = curr_point + complex(number_label_offset_distance, 0)
+        offset_point_left = curr_point - complex(number_label_offset_distance, 0)
+        offset_point_top = curr_point + complex(0, number_label_offset_distance)
+        offset_point_bottom = curr_point - complex(0, number_label_offset_distance)
 
-          # Check for overlap with existing labels
-          overlaps = {
-              'right': any(abs(offset_point_right - label['position']) < overlap_thresh*1.25 for label in label_data),
-              'left': any(abs(offset_point_left - label['position']) < overlap_thresh*1.25 for label in label_data),
-              'top': any(abs(offset_point_top - label['position']) < overlap_thresh for label in label_data),
-              'bottom': any(abs(offset_point_bottom - label['position']) < overlap_thresh for label in label_data)
-          }
+        # Check for overlap with existing labels
+        overlaps = {
+            'right': any(abs(offset_point_right - label['position']) < overlap_thresh*1.25 for label in label_data),
+            'left': any(abs(offset_point_left - label['position']) < overlap_thresh*1.25 for label in label_data),
+            'top': any(abs(offset_point_top - label['position']) < overlap_thresh for label in label_data),
+            'bottom': any(abs(offset_point_bottom - label['position']) < overlap_thresh for label in label_data)
+        }
 
-          # Determine the best position for the label based on available space
-          if not overlaps['right']:
-              offset_point = offset_point_right
-              ha = 'left'
-              va = 'center'
-          elif not overlaps['top']:
-              offset_point = offset_point_top
-              ha = 'center'
-              va = 'bottom'
-          elif not overlaps['bottom']:
-              offset_point = offset_point_bottom
-              ha = 'center'
-              va = 'top'
-          elif not overlaps['left']:
-              offset_point = offset_point_left
-              ha = 'right'
-              va = 'center'
-          else:
-              # Default to right if all positions are overlapping
-              offset_point = offset_point_right
-              ha = 'left'
-              va = 'center'
+        # Determine the best position for the label based on available space
+        if not overlaps['right']:
+          offset_point = offset_point_right
+          ha = 'left'
+          va = 'center'
+        elif not overlaps['top']:
+          offset_point = offset_point_top
+          ha = 'center'
+          va = 'bottom'
+        elif not overlaps['bottom']:
+          offset_point = offset_point_bottom
+          ha = 'center'
+          va = 'top'
+        elif not overlaps['left']:
+          offset_point = offset_point_left
+          ha = 'right'
+          va = 'center'
+        else:
+          # Default to right if all positions are overlapping
+          offset_point = offset_point_right
+          ha = 'left'
+          va = 'center'
 
-          # Store the new label position and data
-          label_data.append({'position': offset_point, 'text': str(i + 1), 'ha': ha, 'va': va})
+        # Store the new label position and data with the original label text
+        label_data.append({'position': offset_point, 'text': str(i + 1), 'ha': ha, 'va': va})
 
+      # Plot the subshape index inside each dot
+      for i, (x, y) in enumerate(zip(x_coords, y_coords)):
+        ax.text(x, y, f"{subshape_counter}", fontsize=2, ha='center', va='center', 
+                color='#ffffff', fontproperties=label_font, zorder=3)
+
+      subshape_counter += 1  # Increment the subshape counter for the next subshape
 
   # Plot all points at once
   if not draw_lines:
@@ -148,12 +153,13 @@ if __name__ == "__main__":
 
   # Plot all labels at once
   for label in label_data:
-      ax.text(label['position'].real, label['position'].imag, label['text'], 
-              fontsize=number_label_fontsize, ha=label['ha'], va=label['va'], color='#a0a0a0', 
-              fontproperties=custom_font, zorder=1)  # Reduced the font size
+    ax.text(label['position'].real, label['position'].imag, label['text'], 
+            fontsize=number_label_fontsize, ha=label['ha'], va=label['va'], color='#a0a0a0', 
+            fontproperties=label_font, zorder=1)  # Reduced the font size
 
-  # Plot all characters underneath the dots
-  for (char_x, char_y, char) in char_positions:
+  if show_characters:
+    # Plot all characters underneath the dots
+    for (char_x, char_y, char) in char_positions:
       ax.text(char_x, char_y, char, fontsize=char_fontsize, ha='center', va='center',
               color='#808080', fontproperties=FontProperties(fname=args.font), zorder=1)
 
