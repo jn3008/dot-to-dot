@@ -7,13 +7,13 @@ import os
 
 label_font = FontProperties(fname='fonts/ZCOOLKuaiLe-Regular.ttf')
 
-show_characters = False
+show_characters = True
 draw_lines = False
 char_fontsize = 7
 dot_size = 0.5
 number_label_fontsize = 2.5
 number_label_offset_distance = 10  # Fixed offset distance
-overlap_thresh = 25 # For fixing overlapping labels
+overlap_thresh = 15 # For fixing overlapping labels
 
 if __name__ == "__main__":
   # Command-line argument parsing
@@ -24,7 +24,8 @@ if __name__ == "__main__":
   parser.add_argument("--dots", type=int, default=100, help="Number of dots to generate per path")
   parser.add_argument("--output", help="Path to save the output PDF", default=None)
   parser.add_argument("--dpi", type=int, default=300, help="DPI for the output PDF to control scaling")
-  parser.add_argument("--threshold", type=int, default=0, help="Threshold factor for removing close points")
+  parser.add_argument("--distance_threshold", type=int, default=20, help="Distance threshold for reducing points")
+  parser.add_argument("--angle_threshold", type=int, default=160, help="Angle factor for reducing points")
 
   args = parser.parse_args()
 
@@ -34,7 +35,7 @@ if __name__ == "__main__":
     fontname = os.path.splitext(os.path.basename(args.font))[0] if args.font else "no_font"
 
     # Use provided arguments to construct the output filename
-    args.output = f"output/text{args.text if args.text else 'no_text'}_{fontname}_dots{args.dots}_thresh{args.threshold}.pdf"
+    args.output = f"output/text{args.text if args.text else 'no_text'}_{fontname}_dots{args.dots}_dist{args.distance_threshold}_angle{args.angle_threshold}.pdf"
 
 
   # Set up the figure for printing layout
@@ -46,7 +47,9 @@ if __name__ == "__main__":
 
   for i, char in enumerate(args.text):
     dots_glyph = get_dots(svg_file=args.svg_file, text=char, 
-                          font=args.font, total_dots=args.dots, threshold_factor=args.threshold)
+                          font=args.font, total_dots=args.dots, 
+                          distance_threshold=args.distance_threshold,
+                          angle_threshold = args.angle_threshold)
 
     for dots_subpath in dots_glyph:
       if not draw_lines: # If we don't want to preview the drawn dot-to-dot
@@ -91,7 +94,7 @@ if __name__ == "__main__":
           
       # Debug: draw lines for the dot-to-dot
       if draw_lines:
-        ax.plot(x_coords, y_coords, color='#808080', zorder=2)  # Reduced the size of the points
+        ax.plot(x_coords, y_coords, color='#a0c0a0', zorder=2)  # Reduced the size of the points
 
       # Add coordinates to the master list for plotting later
       all_x_coords.extend(x_coords)
@@ -148,8 +151,8 @@ if __name__ == "__main__":
       subshape_counter += 1  # Increment the subshape counter for the next subshape
 
   # Plot all points at once
-  if not draw_lines:
-    ax.scatter(all_x_coords, all_y_coords, color='#808080', s=dot_size, zorder=2)  # Reduced the size of the points
+  # if not draw_lines:
+  ax.scatter(all_x_coords, all_y_coords, color='#808080', s=dot_size, zorder=2)  # Reduced the size of the points
 
   # Plot all labels at once
   for label in label_data:

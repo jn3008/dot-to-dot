@@ -123,6 +123,71 @@ def remove_close_points(ordered_points, threshold_factor, preserve_corners=True)
     # return np.array(filtered_points)
     return filtered_points
 
+import numpy as np
+
+def remove_close_points_with_angle(ordered_points, distance_threshold, angle_threshold, preserve_corners=True):
+    """
+    Removes points that are too close or have shallow angles, preserving corner points if specified.
+
+    Parameters:
+        ordered_points (list of complex): Ordered points representing a closed curve.
+        distance_threshold (float): Minimum distance between points.
+        angle_threshold (float): Minimum angle (in degrees) to keep a point.
+        preserve_corners (bool): Whether to preserve extreme corner points.
+
+    Returns:
+        list of complex: Filtered list of points.
+    """
+    def calculate_angle(p1, p2, p3):
+        """Calculate the angle (in degrees) at p2 formed by points p1, p2, and p3."""
+        v1 = np.array([p1.real - p2.real, p1.imag - p2.imag])
+        v2 = np.array([p3.real - p2.real, p3.imag - p2.imag])
+        # Normalize vectors
+        v1 = v1 / np.linalg.norm(v1)
+        v2 = v2 / np.linalg.norm(v2)
+        # Calculate the angle in radians and convert to degrees
+        angle = np.arccos(np.clip(np.dot(v1, v2), -1.0, 1.0))
+        return np.degrees(angle)
+
+    # Identify corner points (extreme x and y values)
+    if preserve_corners:
+        xs = [p.real for p in ordered_points]
+        ys = [p.imag for p in ordered_points]
+        corners = set([
+            ordered_points[np.argmin(xs)],
+            ordered_points[np.argmax(xs)],
+            ordered_points[np.argmin(ys)],
+            ordered_points[np.argmax(ys)],
+        ])
+    else:
+        corners = set()
+
+    # Remove points based on distance and angle thresholds
+    filtered_points = []
+    n = len(ordered_points)
+    
+    for i in range(n):
+        prev_point = ordered_points[i - 1]  # Previous point (wraps around)
+        curr_point = ordered_points[i]     # Current point
+        next_point = ordered_points[(i + 1) % n]  # Next point (wraps around)
+
+        # Calculate distance from the previous point
+        distance = abs(curr_point - prev_point)
+
+        # Calculate the angle at the current point
+        angle = calculate_angle(prev_point, curr_point, next_point)
+
+        # Keep the point if it's far enough, has a sharp enough angle, or is a corner
+        if (
+            distance > distance_threshold or
+            angle < angle_threshold or
+            curr_point in corners
+        ):
+            filtered_points.append(curr_point)
+
+    return filtered_points
+
+
 # Generate SVG Path from a glyph
 def get_svg_path_from_glyph(glyph, font_path):
     font = TTFont(font_path)
@@ -180,7 +245,7 @@ def get_paths(svg_file=None, text=None, font=None, total_dots=100):
     return paths
 
 # Function to get dots from SVG or text input
-def get_dots(svg_file=None, text=None, font=None, total_dots=100, threshold_factor=0.02):
+def get_dots(svg_file=None, text=None, font=None, total_dots=100, distance_threshold=20, angle_threshold=160):
 
     all_dots = []
     
@@ -226,14 +291,13 @@ def get_dots(svg_file=None, text=None, font=None, total_dots=100, threshold_fact
         # Remove points if path is too dense
         if True and num_dots > 5:
         # if False:
-            # threshold_factor = 0.02  # Adjust the factor based on desired sensitivity
             size_diff = len(dots)
-            final_points = remove_close_points(dots, threshold_factor)
+            # final_points = remove_close_points(dots, threshold_factor)
+            final_points = remove_close_points_with_angle(dots, distance_threshold, angle_threshold)
             dots = final_points
             size_diff -= len(dots)
             if size_diff > 0:
                 print(size_diff)
-            # dots = np.array([complex(p[0], p[1]) for p in final_points])
         
         all_dots.append(dots)
     
@@ -246,8 +310,9 @@ if __name__ == "__main__":
     parser.add_argument("--svg_file", help="Path to the SVG file", default=None)
     parser.add_argument("--text", help="Text to convert to SVG", default=None)
     parser.add_argument("--font", help="Path to the font file (required if using text)", default=None)
-    parser.add_argument("--dots", type=int, default=100, help="Number of dots to generate per path")
-    parser.add_argument("--threshold", type=float, default=0.02, help="Threshold factor for removing close points")
+    parser.add_argument("--distance_threshold", type=int, default=20, help="Distance threshold for reducing points")
+    parser.add_argument("--angle_threshold", type=int, default=160, help="Angle factor for reducing points")
+
     
     args = parser.parse_args()
 
@@ -261,7 +326,9 @@ if __name__ == "__main__":
         patch = patches.PathPatch(mpl_path, facecolor='none', edgecolor='gray', lw=1, alpha=0.9)
         ax.add_patch(patch)
 
-    all_dots = get_dots(svg_file=args.svg_file, text=args.text, font=args.font, total_dots=args.dots)
+    all_dots = get_dots(svg_file=args.svg_file, text=args.text, font=args.font, 
+                        total_dots=args.dots, distance_threshold=args.distance_threshold,
+                        angle_threshold = args.angle_threshold)
 
     for dots in all_dots:
 
