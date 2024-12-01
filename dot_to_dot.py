@@ -7,11 +7,6 @@ from svgpathtools import parse_path, svg2paths, Line, QuadraticBezier, CubicBezi
 import argparse
 import matplotlib.patches as patches
 from matplotlib.path import Path as MplPath
-from scipy.spatial.distance import pdist, squareform
-from ortools.constraint_solver import routing_enums_pb2
-from ortools.constraint_solver import pywrapcp
-import random 
-from scipy.spatial.distance import pdist, squareform
 
 def find_closest_pair(list1, list2):
     """
@@ -113,18 +108,6 @@ def get_evenly_spaced_points_from_subpath(subpath, num_dots_subpath):
     total_length = subpath.length()
 
     num_dots_per_curve = [int(num_dots_subpath * (length / total_length)) for length in curve_lengths]
-    # Adjust the number of dots to ensure the total matches args.dots
-    # i = 0
-    # while sum(num_dots_per_curve) < num_dots_subpath:
-    #     num_dots_per_curve[num_dots_per_curve.index(i)] += 1
-    #     i+=1
-
-    # print("dots_for_subpath", max(1, num_dots_subpath))
-
-    # print(num_dots_per_curve)
-
-    # print(curve_lengths)
-
 
     all_points = []
     # for subpath in subpaths:
