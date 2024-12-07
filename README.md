@@ -27,7 +27,7 @@ python3 create_dot_to_dot_layout.py --text <text> --font <path_to_font> [optiona
 ## Example
 
 ```bash
-python3 create_dot_to_dot_layout.py --text "原令子" --font "fonts/hiragino-kaku-gothic-std-w8.otf" --dots 200 --distance_threshold 120 --angle_threshold 160 --show_chars --draw_lines
+python3 create_dot_to_dot_layout.py --text "原令子" --font "fonts/hiragino-kaku-gothic-std-w8.otf" --dots 200 --distance_threshold 120 --angle_threshold 160 --chars --lines
 ```
 
 ### Result
