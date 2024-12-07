@@ -62,6 +62,7 @@ The leftmost image is the same as the right but with `--show_chars --draw_lines`
 
 ## To-do
 
+- display number labels over drawn lines
 - add support for other languages e.g. arabic
 - add option to choose which direction to stack characters (horizontal/vertical)
 - add option for output file format
