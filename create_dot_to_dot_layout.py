@@ -78,13 +78,14 @@ if __name__ == "__main__":
   if args.separate_off:
     glyphs = args.text.split(" ")
   else:
-    glyphs = [char for char in args.text]
+    glyphs = [char for char in # Delete all whitespaces
+              args.text.replace(" ", "").replace("\t", "").replace("\n", "").replace("\r", "")]
 
   for i, char in enumerate(glyphs):
     glyph_dots = get_dots(
       text=char,
       font=args.font,
-      total_dots=args.dots if separate_chars else args.dots * len(glyphs),
+      total_dots=args.dots if not args.separate_off else args.dots * len(glyphs),
       merge=not args.no_merge,
       distance_threshold=args.distance_threshold,
       angle_threshold=args.angle_threshold,
@@ -104,23 +105,37 @@ if __name__ == "__main__":
 
   max_height = max([glyph_bounds["max_y"] - glyph_bounds["min_y"] for glyph_bounds in word_bounds])
   max_width = max([glyph_bounds["max_x"] - glyph_bounds["min_x"] for glyph_bounds in word_bounds])
+  
+  
+  margin = 0
 
   for i, glyph_dots in enumerate(word_dots):
-    if i != 0:
+    if i == 0:
       for j, dot in enumerate(glyph_dots):
         if args.direction == 'N':
-          glyph_dots[j] += complex(0, max_height * i)
+          glyph_dots[j] -= complex(0, word_bounds[i]["min_y"])
         elif args.direction == 'E':
-          glyph_dots[j] += complex(max_width * i, 0)
+          glyph_dots[j] -= complex(word_bounds[i]["min_x"], 0)
         elif args.direction == 'S':
-          glyph_dots[j] -= complex(0, max_height * i)
+          glyph_dots[j] -= complex(0, word_bounds[i]["max_y"])
         elif args.direction == 'W':
-          glyph_dots[j] -= complex(max_width * i, 0)
+          glyph_dots[j] -= complex(word_bounds[i]["max_x"], 0)
 
-      dots_x = [dot.real for dot in glyph_dots]
-      dots_y = [dot.imag for dot in glyph_dots]
-      word_bounds[i] = {"min_x":min(dots_x), "max_x":max(dots_x), 
-                        "min_y":min(dots_y), "max_y":max(dots_y)}
+    if i > 0:
+      for j, dot in enumerate(glyph_dots):
+        if args.direction == 'N':
+          glyph_dots[j] += complex(0, margin + word_bounds[i-1]["max_y"] - word_bounds[i]["min_y"])
+        elif args.direction == 'E':
+          glyph_dots[j] += complex(margin + word_bounds[i-1]["max_x"] - word_bounds[i]["min_x"], 0)
+        elif args.direction == 'S':
+          glyph_dots[j] += complex(0, - margin + word_bounds[i-1]["min_y"] - word_bounds[i]["max_y"])
+        elif args.direction == 'W':
+          glyph_dots[j] += complex(- margin + word_bounds[i-1]["min_x"] - word_bounds[i]["max_x"], 0)
+
+    dots_x = [dot.real for dot in glyph_dots]
+    dots_y = [dot.imag for dot in glyph_dots]
+    word_bounds[i] = {"min_x":min(dots_x), "max_x":max(dots_x), 
+                      "min_y":min(dots_y), "max_y":max(dots_y)}
     
     char_x = word_bounds[i]["max_x"]
     char_y = word_bounds[i]["min_y"] - 50  # Increase positioning the character below the dots to make it clearly visible

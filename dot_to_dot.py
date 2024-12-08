@@ -176,8 +176,41 @@ def path_to_polygon(path, path_num_dots):
   dots = get_evenly_spaced_dots_from_path(path, path_num_dots)
   return Polygon([(p.real, p.imag) for p in dots])
 
-# Merge overlapping shapes
 def merge_overlapping_shapes(paths_with_counts):
+  polygons = [path_to_polygon(path, dot_count) for (path, dot_count) in paths_with_counts]
+  merged_shapes = []
+
+  for poly in polygons:
+    # Fix self-intersecting or invalid polygons
+    if not poly.is_valid:
+      print("Fixing invalid polygon...")
+      poly = poly.buffer(0)  # Attempt to fix invalid geometry
+
+    if poly.geom_type == 'MultiPolygon':
+      print("Merging MultiPolygon into a single polygon...")
+      poly = unary_union(poly)  # Merge multipolygon components
+
+    added = False
+    for i, merged in enumerate(merged_shapes):
+      if not merged.is_valid:
+        print("Fixing invalid merged geometry...")
+        merged = merged.buffer(0)  # Fix any invalid merged geometry
+      try:
+        if merged.intersects(poly):
+          merged_shapes[i] = merged.union(poly)  # Merge overlapping polygons
+          added = True
+          break
+      except Exception as e:
+        print(f"Error merging polygons: {e}")
+        continue
+
+    if not added:
+      merged_shapes.append(poly)
+
+  return merged_shapes
+
+# Merge overlapping shapes (did not work for self-intersecting polygons)
+def merge_overlapping_shapes_old(paths_with_counts):
   polygons = [path_to_polygon(path, dot_count) for (path, dot_count) in paths_with_counts]
   merged_shapes = []
 
@@ -204,6 +237,9 @@ def merge_paths(paths_with_counts):
   all_dots = []
   for polygon in merged_shapes:
     all_dots.append([complex(v[0], v[1]) for v in list(polygon.exterior.coords)])
+    for interior in polygon.interiors:
+      all_dots.append([complex(v[0], v[1]) for v in interior.coords])
+
 
   return all_dots
 
