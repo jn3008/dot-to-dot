@@ -50,20 +50,21 @@ The leftmost image is the same as the right but with `--show_chars --draw_lines`
 
 ### Optional Arguments
 
-| Argument                | Description                                                    | Default     |
-| ----------------------- | -------------------------------------------------------------- | ----------- |
-| `--dots`                | Number of dots to generate per character before dot reduction. | `100`       |
-| `--output`              | Path to save the output PDF.                                   | `Automatic` |
-| `--distance_threshold`  | Distance threshold for reducing points.                        | `20`        |
-| `--angle_threshold`     | Angle threshold for reducing points.                           | `160`       |
-| `--show_chars`          | Show character hints (debugging mode).                         | `False`     |
-| `--draw_lines`          | Draw lines between dots.                                       | `False`     |
-| `--visual_label_offset` | Multiplier to adjust the visual distance of labels from dots.  | `0.4`       |
+| Argument                | Description                                                                | Default     |
+| ----------------------- | -------------------------------------------------------------------------- | ----------- |
+| `--dots`                | Number of dots to generate per character before dot reduction.             | `100`       |
+| `--output`              | Path to save the output PDF.                                               | `Automatic` |
+| `--distance_threshold`  | Distance threshold for reducing points.                                    | `20`        |
+| `--angle_threshold`     | Angle threshold for reducing points.                                       | `160`       |
+| `--no_merge`            | Do not merge overlapping shapes.                                           | -           |
+| `--show_chars`          | Show character hints (debugging mode).                                     | -           |
+| `--draw_lines`          | Draw lines between dots.                                                   | -           |
+| `--visual_label_offset` | Multiplier to adjust the visual distance of labels from dots.              | `0.4`       |
+| `--reduce_straights`    | Reduce consecutive points further apart on straight lines.                 | -           |
+| `--draw_lines`          | Direction in which consecutive characters are placed. (`N`, `E`, `S`, `W`) | `E`         |
+| `--separate_off`        | Don't separate characters; do one word at a time (useful for arabic)       | -           |
 
 ## To-do
 
-- display number labels over drawn lines
-- add support for other languages e.g. arabic
-- add option to choose which direction to stack characters (horizontal/vertical)
 - add option for output file format
 - create simple gui

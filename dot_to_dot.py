@@ -9,6 +9,8 @@ import argparse
 import matplotlib.patches as patches
 from matplotlib.path import Path as MplPath
 from shapely.geometry import Polygon
+import uharfbuzz as hb
+import freetype
 
 def find_closest_pair(list1, list2):
   """
@@ -26,9 +28,7 @@ def find_closest_pair(list1, list2):
   return index1, index2
 
 def rotate_and_split(lst, split_index):
-  """
-  Rotates the list so that the element at split_index becomes the first element.
-  """
+  # Rotates the list so that the element at split_index becomes the first element.
   return lst[split_index:] + lst[:split_index]
 
 def stitch_dots(all_dots):
@@ -61,6 +61,9 @@ def stitch_dots(all_dots):
 
 # Generate SVG Path from a glyph
 def get_svg_path_from_glyph(glyph, font_path):
+  if isinstance(glyph, str) and len(glyph) > 1:
+    return get_svg_path_from_string(glyph, font_path)
+
   font = TTFont(font_path)
   glyph_set = font.getGlyphSet()
   char_map = font.getBestCmap()
@@ -76,22 +79,57 @@ def get_svg_path_from_glyph(glyph, font_path):
   path_data = pen.getCommands()
   return parse_path(path_data)
 
-# def get_evenly_spaced_points_per_curve(curve, num_points):
-#   """
-#   Generate evenly spaced points along a single curve.
-  
-#   Parameters:
-#   - curve: A segment of a path (e.g., Line, CubicBezier, QuadraticBezier).
-#   - num_points: Number of points to generate along the curve.
-  
-#   Returns:
-#   - A list of complex numbers representing the points.
-#   """
-#   total_length = curve.length()
-#   distances = np.linspace(0, total_length, num=num_points, endpoint=False)
-#   points = [curve.point(curve.ilength(distance)) for distance in distances]
-#   return points
 
+def get_svg_path_from_string(string, font_path):
+  # Load the font data
+  with open(font_path, "rb") as font_file:
+    font_data = font_file.read()
+
+  # Create HarfBuzz Face and Font objects
+  hb_face = hb.Face(font_data)
+  hb_font = hb.Font(hb_face)
+
+  # Create a HarfBuzz buffer and add the text
+  buf = hb.Buffer()
+  buf.add_str(string)
+  buf.guess_segment_properties()
+
+  # Shape the text
+  hb.shape(hb_font, buf)
+
+  # Get glyph information and positions
+  infos = buf.glyph_infos
+  positions = buf.glyph_positions
+
+  # Load the font with fontTools for glyph extraction
+  font = TTFont(font_path)
+  glyph_set = font.getGlyphSet()
+
+  # Combine glyph paths into a single SVG path
+  combined_path = Path()
+  x, y = 0, 0  # Starting pen position
+
+  for info, pos in zip(infos, positions):
+    glyph_name = font.getGlyphName(info.codepoint)
+    glyph = glyph_set[glyph_name]
+
+    # Create an SVG path for the glyph
+    pen = SVGPathPen(glyph_set)
+    glyph.draw(pen)
+    glyph_path = parse_path(pen.getCommands())
+
+    # Translate glyph path to its correct position
+    # glyph_path = glyph_path.translated((x + pos.x_offset, y + pos.y_offset))
+    glyph_path = glyph_path.translated(complex(x + pos.x_offset, y + pos.y_offset))
+
+    # Update the pen position
+    x += pos.x_advance
+    y += pos.y_advance
+
+    # Add the glyph path to the combined path
+    combined_path += glyph_path
+
+  return combined_path
 def get_evenly_spaced_dots_from_path(path, path_num_dots):
   path_num_dots = max(1, path_num_dots)
 
@@ -111,12 +149,12 @@ def convert_to_mpl_path(svg_path):
   codes = []
   for segment in svg_path:
     if isinstance(segment, (Line, QuadraticBezier, CubicBezier)):
-      vertices.append((segment.start.real, -segment.start.imag))
+      vertices.append((segment.start.real, segment.start.imag))
       codes.append(MplPath.MOVETO)
       for point in segment:
-        vertices.append((point.real, -point.imag))
+        vertices.append((point.real, point.imag))
         codes.append(MplPath.LINETO)
-    vertices.append((segment.end.real, -segment.end.imag))
+    vertices.append((segment.end.real, segment.end.imag))
     codes.append(MplPath.LINETO)
   return MplPath(vertices, codes)
 
@@ -286,7 +324,6 @@ def get_dots(text=None, font=None, total_dots=100, distance_threshold=20, angle_
   
   # Example usage with parsed arguments
   if merge:
-    # paths = get_paths_with_merging(text, font)
     all_dots = merge_paths(zip(paths, num_dots_per_path))
   else:
 
@@ -301,18 +338,9 @@ def get_dots(text=None, font=None, total_dots=100, distance_threshold=20, angle_
       all_dots[i].append(dots[0])
     print(len(all_dots[i]))
   
-
-  # def scale_dots_to_max_y(all_dots, target_extent=100):
-  #   all_y_coords = [dot.imag for sublist in all_dots for dot in sublist]
-  #   y_max, y_min = max(all_y_coords), min(all_y_coords)
-  #   scaling_factor = target_extent / (y_max - y_min) if y_max != y_min else 1
-  #   return [[dot * scaling_factor for dot in sublist] for sublist in all_dots]
-  
-  # all_dots = scale_dots_to_max_y(all_dots, 1000)
-  
-  # for i in range(len(all_dots)):
   for i, dots in enumerate(all_dots):
 
+    # Remove any consecutive duplicate dots
     remove_consecutive_duplicates(all_dots[i])
 
     if len(all_dots[i]) > 3:
@@ -327,61 +355,9 @@ def get_dots(text=None, font=None, total_dots=100, distance_threshold=20, angle_
       if size_diff > 0:
         print("removed", size_diff)
 
-    # Remove any consecutive duplicate dots
-    # remove_consecutive_duplicates(all_dots[i])
     
   stitched_dots = stitch_dots(all_dots)
-  # if len(stitched_dots) > 1:
-  #   if not abs(stitched_dots[-1]-stitched_dots[0]) < 1:
-  #     stitched_dots.append(stitched_dots[0])
   
   print("total_dots", len(stitched_dots))
   
   return stitched_dots
-
-if __name__ == "__main__":
-  # Command-line argument parsing
-  parser = argparse.ArgumentParser(description="Convert an SVG file or text into a dot-to-dot representation.")
-  parser.add_argument("--svg_file", help="Path to the SVG file", default=None)
-  parser.add_argument("--text", help="Text to convert to SVG", default=None)
-  parser.add_argument("--font", help="Path to the font file (required if using text)", default=None)
-  parser.add_argument("--no_merge", action="store_false", help="Do not merge overlapping shapes")
-  parser.add_argument("--distance_threshold", type=int, default=20, help="Distance threshold for reducing points")
-  parser.add_argument("--angle_threshold", type=int, default=160, help="Angle factor for reducing points")
-
-  args = parser.parse_args()
-
-  fig, ax = plt.subplots()
-
-  paths = get_paths(text=args.text, font=args.font, total_dots=args.dots)
-
-  # Plot the underlying SVG
-  for path in paths:
-    mpl_path = convert_to_mpl_path(path)
-    patch = patches.PathPatch(mpl_path, facecolor='none', edgecolor='gray', lw=1, alpha=0.9)
-    ax.add_patch(patch)
-
-  all_dots = get_dots(svg_file=args.svg_file, text=args.text, font=args.font, 
-                      total_dots=args.dots, distance_threshold=args.distance_threshold,
-                      angle_threshold = args.angle_threshold, merge=not args.no_merge)
-
-  for dots in all_dots:
-    x_coords = [dot.real for dot in dots]
-    y_coords = [-dot.imag for dot in dots]
-    
-    # Plotting the dots
-    plt.scatter(x_coords, y_coords, color='blue')
-    
-    # Plotting lines between consecutive dots
-    plt.plot(x_coords, y_coords, color='lightgreen', alpha=0.5)
-    
-    # Numbering the dots
-    for i, (x, y) in enumerate(zip(x_coords, y_coords), start=1):
-      plt.text(x, y, str(i), fontsize=8, ha='right', va='bottom', color='red')
-      
-  plt.gca().invert_yaxis()
-  plt.title("Dot-to-Dot Representation with Lines, Numbered Dots, and Underlying SVG")
-  plt.xlabel("X Coordinates")
-  plt.ylabel("Y Coordinates")
-  plt.axis('equal')
-  plt.show()

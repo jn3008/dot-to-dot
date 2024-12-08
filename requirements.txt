@@ -3,3 +3,5 @@ numpy
 fonttools
 svgpathtools
 shapely
+freetype-py
+uharfbuzz

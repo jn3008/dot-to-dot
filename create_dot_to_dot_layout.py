@@ -38,11 +38,13 @@ if __name__ == "__main__":
   parser.add_argument("--output", help="Path to save the output PDF", default=None)
   parser.add_argument("--distance_threshold", type=int, default=20, help="Distance threshold for reducing points")
   parser.add_argument("--angle_threshold", type=int, default=160, help="Angle threshold for reducing points")
-  parser.add_argument("--no_merge", action="store_true", help="Merge overlapping shapes")
+  parser.add_argument("--no_merge", action="store_true", help="Do not merge overlapping shapes")
   parser.add_argument("--chars", action="store_true", help="Show hints")
   parser.add_argument("--lines", action="store_true", help="Draw lines between dots")
   parser.add_argument("--visual_label_offset", type=float, default=0.4, help="Multiplier to adjust the visual distance of labels from the dots")
-  parser.add_argument("--reduce_straights", action="store_true", help="Reduce further consecutive points on straight lines")
+  parser.add_argument("--reduce_straights", action="store_true", help="Reduce consecutive points further apart on straight lines")
+  parser.add_argument("--direction", type=str, choices=['N', 'E', 'S', 'W'], default='E', help="Direction in which consecutive characters are placed")
+  parser.add_argument("--separate_off", action="store_true", help="Don't separate characters (useful for arabic)")
 
   args = parser.parse_args()
   print(args.no_merge)
@@ -69,11 +71,20 @@ if __name__ == "__main__":
 
   global_scale = 1
 
-  for i, char in enumerate(args.text):
+  separate_chars = False
+
+
+
+  if args.separate_off:
+    glyphs = args.text.split(" ")
+  else:
+    glyphs = [char for char in args.text]
+
+  for i, char in enumerate(glyphs):
     glyph_dots = get_dots(
       text=char,
       font=args.font,
-      total_dots=args.dots,
+      total_dots=args.dots if separate_chars else args.dots * len(glyphs),
       merge=not args.no_merge,
       distance_threshold=args.distance_threshold,
       angle_threshold=args.angle_threshold,
@@ -84,35 +95,37 @@ if __name__ == "__main__":
     dots_y = [dot.imag for dot in glyph_dots]
     word_bounds.append({"min_x":min(dots_x), "max_x":max(dots_x), 
                         "min_y":min(dots_y), "max_y":max(dots_y)})
-
-    # if i > 0:
-    #   # Extract y-coordinates of previous glyph
-    #   flat_dots_imag = [dot.imag for dot in word_dots[i - 1]]
-    #   imag_distance = max(flat_dots_imag) - min(flat_dots_imag)  # Calculate vertical distance
-
-    #   for j, dot in enumerate(glyph_dots):
-    #     glyph_dots[j] = complex(dot.real, dot.imag - (imag_distance * 1.1) * i)
-
+    
     word_dots.append(glyph_dots)
 
-    # Calculate the approximate center position of the current glyph for character plotting
-    flat_dots_real = [dot.real for dot in glyph_dots]
-    flat_dots_imag = [dot.imag for dot in glyph_dots]
-    char_x = max(flat_dots_real)
-    char_y = min(flat_dots_imag) - 50  # Increase positioning the character below the dots to make it clearly visible
-    char_positions.append((char_x, char_y, char))
-
-    # Create a single figure for plotting
-    fig, ax = plt.subplots(figsize=(20, 20))
-    ax.set_aspect("equal")  # Set aspect ratio to be equal to prevent squishing
+  # Create a single figure for plotting
+  fig, ax = plt.subplots(figsize=(20, 20))
+  ax.set_aspect("equal")  # Set aspect ratio to be equal to prevent squishing
 
   max_height = max([glyph_bounds["max_y"] - glyph_bounds["min_y"] for glyph_bounds in word_bounds])
+  max_width = max([glyph_bounds["max_x"] - glyph_bounds["min_x"] for glyph_bounds in word_bounds])
 
   for i, glyph_dots in enumerate(word_dots):
-    if i == 0:
-      continue
-    for j, dot in enumerate(glyph_dots):
-      glyph_dots[j] -= complex(0, max_height * i)
+    if i != 0:
+      for j, dot in enumerate(glyph_dots):
+        if args.direction == 'N':
+          glyph_dots[j] += complex(0, max_height * i)
+        elif args.direction == 'E':
+          glyph_dots[j] += complex(max_width * i, 0)
+        elif args.direction == 'S':
+          glyph_dots[j] -= complex(0, max_height * i)
+        elif args.direction == 'W':
+          glyph_dots[j] -= complex(max_width * i, 0)
+
+      dots_x = [dot.real for dot in glyph_dots]
+      dots_y = [dot.imag for dot in glyph_dots]
+      word_bounds[i] = {"min_x":min(dots_x), "max_x":max(dots_x), 
+                        "min_y":min(dots_y), "max_y":max(dots_y)}
+    
+    char_x = word_bounds[i]["max_x"]
+    char_y = word_bounds[i]["min_y"] - 50  # Increase positioning the character below the dots to make it clearly visible
+    char_positions.append((char_x, char_y, glyphs[i]))
+    
 
   all_dots =[]
 
@@ -127,7 +140,7 @@ if __name__ == "__main__":
 
   # Debug: draw lines for the dot-to-dot
   if args.lines:
-    ax.plot(x_coords, y_coords, color="#a0c0a0", zorder=2)
+    ax.plot(x_coords, y_coords, color="#b8d8b8", zorder=0)
 
   # Add coordinates to the master list for plotting later
   all_x_coords.extend(x_coords)
@@ -202,7 +215,7 @@ if __name__ == "__main__":
     for (char_x, char_y, char) in char_positions:
       ax.text(
         char_x, char_y, char, fontsize=char_fontsize, ha="center", va="center",
-        color="#808080", fontproperties=FontProperties(fname=args.font), zorder=1,
+        color="#808080", fontproperties=FontProperties(fname=args.font), zorder=0,
       )
 
   # Remove axes, ticks, and labels
