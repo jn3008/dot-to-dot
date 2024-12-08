@@ -1,12 +1,16 @@
 # dot_to_dot.py
+import math
 import numpy as np
 from matplotlib import pyplot as plt
 from fontTools.ttLib import TTFont
 from fontTools.pens.svgPathPen import SVGPathPen
-from svgpathtools import parse_path, Line, QuadraticBezier, CubicBezier
+from svgpathtools import parse_path, Line, QuadraticBezier, CubicBezier, Path
 import argparse
 import matplotlib.patches as patches
 from matplotlib.path import Path as MplPath
+from shapely.geometry import Polygon
+import uharfbuzz as hb
+import freetype
 
 def find_closest_pair(list1, list2):
   """
@@ -24,9 +28,7 @@ def find_closest_pair(list1, list2):
   return index1, index2
 
 def rotate_and_split(lst, split_index):
-  """
-  Rotates the list so that the element at split_index becomes the first element.
-  """
+  # Rotates the list so that the element at split_index becomes the first element.
   return lst[split_index:] + lst[:split_index]
 
 def stitch_dots(all_dots):
@@ -59,6 +61,9 @@ def stitch_dots(all_dots):
 
 # Generate SVG Path from a glyph
 def get_svg_path_from_glyph(glyph, font_path):
+  if isinstance(glyph, str) and len(glyph) > 1:
+    return get_svg_path_from_string(glyph, font_path)
+
   font = TTFont(font_path)
   glyph_set = font.getGlyphSet()
   char_map = font.getBestCmap()
@@ -74,49 +79,69 @@ def get_svg_path_from_glyph(glyph, font_path):
   path_data = pen.getCommands()
   return parse_path(path_data)
 
-def get_evenly_spaced_points_per_curve(curve, num_points):
-  """
-  Generate evenly spaced points along a single curve.
-  
-  Parameters:
-  - curve: A segment of a path (e.g., Line, CubicBezier, QuadraticBezier).
-  - num_points: Number of points to generate along the curve.
-  
-  Returns:
-  - A list of complex numbers representing the points.
-  """
-  total_length = curve.length()
-  distances = np.linspace(0, total_length, num=num_points)
-  points = [curve.point(curve.ilength(distance)) for distance in distances]
-  return points
 
-def get_evenly_spaced_points_from_subpath(subpath, num_dots_subpath):
-  """
-  Generate evenly spaced points across all subcurves of a set of subpaths.
-  
-  Parameters:
-  - subpaths: List of Path objects representing continuous subpaths.
-  - num_points_per_curve: Number of points to generate on each subcurve.
-  
-  Returns:
-  - A list of points (complex numbers) from all subcurves.
-  """
+def get_svg_path_from_string(string, font_path):
+  # Load the font data
+  with open(font_path, "rb") as font_file:
+    font_data = font_file.read()
 
-  curves = [curve for curve in subpath]
+  # Create HarfBuzz Face and Font objects
+  hb_face = hb.Face(font_data)
+  hb_font = hb.Font(hb_face)
+
+  # Create a HarfBuzz buffer and add the text
+  buf = hb.Buffer()
+  buf.add_str(string)
+  buf.guess_segment_properties()
+
+  # Shape the text
+  hb.shape(hb_font, buf)
+
+  # Get glyph information and positions
+  infos = buf.glyph_infos
+  positions = buf.glyph_positions
+
+  # Load the font with fontTools for glyph extraction
+  font = TTFont(font_path)
+  glyph_set = font.getGlyphSet()
+
+  # Combine glyph paths into a single SVG path
+  combined_path = Path()
+  x, y = 0, 0  # Starting pen position
+
+  for info, pos in zip(infos, positions):
+    glyph_name = font.getGlyphName(info.codepoint)
+    glyph = glyph_set[glyph_name]
+
+    # Create an SVG path for the glyph
+    pen = SVGPathPen(glyph_set)
+    glyph.draw(pen)
+    glyph_path = parse_path(pen.getCommands())
+
+    # Translate glyph path to its correct position
+    # glyph_path = glyph_path.translated((x + pos.x_offset, y + pos.y_offset))
+    glyph_path = glyph_path.translated(complex(x + pos.x_offset, y + pos.y_offset))
+
+    # Update the pen position
+    x += pos.x_advance
+    y += pos.y_advance
+
+    # Add the glyph path to the combined path
+    combined_path += glyph_path
+
+  return combined_path
+def get_evenly_spaced_dots_from_path(path, path_num_dots):
+  path_num_dots = max(1, path_num_dots)
+
   # Calculate the length of each path and the total length
-  curve_lengths = [curve.length() for curve in curves]
-  total_length = subpath.length()
+  curve_lengths = [curve.length() for curve in path]
+  total_length = path.length()
 
-  num_dots_per_curve = [int(num_dots_subpath * (length / total_length)) for length in curve_lengths]
+  num_dots_per_curve = [math.ceil(path_num_dots * (length / total_length)) for length in curve_lengths]
 
-  all_points = []
-  # for subpath in subpaths:
-  for i, curve in enumerate(subpath):
-    # points = get_evenly_spaced_points_per_curve(curve, num_dots_per_curve[i])
-    points = get_evenly_spaced_points_per_curve(curve, max(1, num_dots_per_curve[i]))
-    all_points.extend(points)
-
-  return all_points
+  dots = [segment.point(t) for (segment, num_dots) in zip(path, num_dots_per_curve)
+             for t in [i * 1.0 / (num_dots) for i in range(num_dots)]]
+  return dots
 
 # Function to convert svgpathtools path to matplotlib path
 def convert_to_mpl_path(svg_path):
@@ -124,12 +149,12 @@ def convert_to_mpl_path(svg_path):
   codes = []
   for segment in svg_path:
     if isinstance(segment, (Line, QuadraticBezier, CubicBezier)):
-      vertices.append((segment.start.real, -segment.start.imag))
+      vertices.append((segment.start.real, segment.start.imag))
       codes.append(MplPath.MOVETO)
       for point in segment:
-        vertices.append((point.real, -point.imag))
+        vertices.append((point.real, point.imag))
         codes.append(MplPath.LINETO)
-    vertices.append((segment.end.real, -segment.end.imag))
+    vertices.append((segment.end.real, segment.end.imag))
     codes.append(MplPath.LINETO)
   return MplPath(vertices, codes)
 
@@ -138,7 +163,6 @@ def convert_to_mpl_path(svg_path):
 def get_paths(text=None, font=None):
   paths = []
   if text and font:
-    # paths.append(get_svg_path_from_glyph(args.text, args.font))
     glyph_path = get_svg_path_from_glyph(text, font)
     paths = [parse_path(subpath.d()) for subpath in glyph_path.continuous_subpaths()]  # Separate disconnected pieces
   else:
@@ -146,181 +170,230 @@ def get_paths(text=None, font=None):
     exit()
 
   return paths
-    
-def remove_close_points_with_angle_updated(ordered_points, distance_threshold, angle_threshold, sample_attempts=2):
-  """
-  Removes points from the ordered list based on distance and angle thresholds by sampling.
-  
-  Parameters:
-      ordered_points (list): A list of complex numbers representing points in order.
-      distance_threshold (float): Minimum allowed distance between consecutive points.
-      angle_threshold (float): Minimum allowed angle (in degrees) at a point.
-      sample_attempts (int): Number of attempts to sample and test a point's validity.
-  
-  Returns:
-      list: A filtered list of points.
-  """
-  def calculate_angle(p1, p2, p3):
-    """Calculate the angle (in degrees) at p2 formed by points p1, p2, and p3."""
-    v1 = np.array([p1.real - p2.real, p1.imag - p2.imag])
-    v2 = np.array([p3.real - p2.real, p3.imag - p2.imag])
-    # Normalize vectors
-    if np.linalg.norm(v1) > 0:
-        v1 = v1 / np.linalg.norm(v1)
-    if np.linalg.norm(v2) > 0:
-        v2 = v2 / np.linalg.norm(v2)
-    # Calculate the angle in radians and convert to degrees
-    angle = np.arccos(np.clip(np.dot(v1, v2), -1.0, 1.0))
-    return np.degrees(angle)
 
-  filtered_points = ordered_points.copy()  # Start with the original points
-  n = len(filtered_points)
+# Convert a path to a polygon for overlap detection
+def path_to_polygon(path, path_num_dots):
+  dots = get_evenly_spaced_dots_from_path(path, path_num_dots)
+  return Polygon([(p.real, p.imag) for p in dots])
+
+def merge_overlapping_shapes(paths_with_counts):
+  polygons = [path_to_polygon(path, dot_count) for (path, dot_count) in paths_with_counts]
+  merged_shapes = []
+
+  for poly in polygons:
+    # Fix self-intersecting or invalid polygons
+    if not poly.is_valid:
+      print("Fixing invalid polygon...")
+      poly = poly.buffer(0)  # Attempt to fix invalid geometry
+
+    if poly.geom_type == 'MultiPolygon':
+      print("Merging MultiPolygon into a single polygon...")
+      poly = unary_union(poly)  # Merge multipolygon components
+
+    added = False
+    for i, merged in enumerate(merged_shapes):
+      if not merged.is_valid:
+        print("Fixing invalid merged geometry...")
+        merged = merged.buffer(0)  # Fix any invalid merged geometry
+      try:
+        if merged.intersects(poly):
+          merged_shapes[i] = merged.union(poly)  # Merge overlapping polygons
+          added = True
+          break
+      except Exception as e:
+        print(f"Error merging polygons: {e}")
+        continue
+
+    if not added:
+      merged_shapes.append(poly)
+
+  return merged_shapes
+
+# Merge overlapping shapes (did not work for self-intersecting polygons)
+def merge_overlapping_shapes_old(paths_with_counts):
+  polygons = [path_to_polygon(path, dot_count) for (path, dot_count) in paths_with_counts]
+  merged_shapes = []
+
+  for poly in polygons:
+    added = False
+    for i, merged in enumerate(merged_shapes):
+      if merged.intersects(poly) and not merged.contains(poly) and not poly.contains(merged):
+        merged_shapes[i] = merged.union(poly)
+        added = True
+        break
+    if not added:
+      merged_shapes.append(poly)
+
+  return merged_shapes
+
+
+
+# Alternative to get_paths: parses and merges overlapping paths while preserving subpaths
+def merge_paths(paths_with_counts):
   
-  # Iterate through points and test for removal
-  for _ in range(sample_attempts):
+  # Merge overlapping shapes while preserving small components
+  merged_shapes = merge_overlapping_shapes(paths_with_counts)
+
+  all_dots = []
+  for polygon in merged_shapes:
+    all_dots.append([complex(v[0], v[1]) for v in list(polygon.exterior.coords)])
+    for interior in polygon.interiors:
+      all_dots.append([complex(v[0], v[1]) for v in interior.coords])
+
+
+  return all_dots
+
+def calculate_angle(p1, p2, p3):
+  """Calculate the angle (in degrees) at p2 formed by points p1, p2, and p3."""
+  v1 = np.array([p1.real - p2.real, p1.imag - p2.imag])
+  v2 = np.array([p3.real - p2.real, p3.imag - p2.imag])
+  # Normalize vectors
+  if np.linalg.norm(v1) > 0:
+      v1 = v1 / np.linalg.norm(v1)
+  if np.linalg.norm(v2) > 0:
+      v2 = v2 / np.linalg.norm(v2)
+  # Calculate the angle in radians and convert to degrees
+  angle = np.arccos(np.clip(np.dot(v1, v2), -1.0, 1.0))
+  return np.degrees(angle)
+    
+def remove_close_dots_with_angle_updated(ordered_dots, min_distance_threshold_max, max_angle_threshold_min, sample_attempts=2, reduce_straights=False):
+  if (sample_attempts < 1):
+    return
+
+  filtered_dots = ordered_dots.copy()  # Start with the original dots
+  n = len(filtered_dots)  
+
+  strictest_adjustment_ratio_angle = 0.1; 
+  strictest_adjustment_ratio_distance = 0.7; 
+
+  # Iterate through dots and test for removal, starting with stricter thresholds
+  for j in range(sample_attempts):
+    if (sample_attempts == 1):
+      distance_threshold = min_distance_threshold_max
+      angle_threshold = max_angle_threshold_min 
+    else:
+      adjustment_ratio_distance = (strictest_adjustment_ratio_distance + 
+        (1 - strictest_adjustment_ratio_distance) * j / (sample_attempts - 1))
+      distance_threshold = min_distance_threshold_max * adjustment_ratio_distance
+
+      adjustment_ratio_angle = (strictest_adjustment_ratio_angle + 
+        (1 - strictest_adjustment_ratio_angle) * j / (sample_attempts - 1))
+      angle_threshold = 180 - adjustment_ratio_angle * (180 - max_angle_threshold_min)
     for i in range(n):
-      if n <= 3:  # Stop if only 3 points remain (minimum for a polygon)
+      if n <= 3:  # Stop if only 3 dots remain (minimum for a polygon)
         print("break")
         break
       
-      # Pick a random point to test
+      # Pick a random dots to test
       i += 1
       i %= n
       
       prev_index = (i - 1) % n
       next_index = (i + 1) % n
       
-      prev_point = filtered_points[prev_index]
-      curr_point = filtered_points[i]
-      next_point = filtered_points[next_index]
+      prev_dot = filtered_dots[prev_index]
+      curr_dot = filtered_dots[i]
+      next_dot = filtered_dots[next_index]
 
-      prev_dist = abs(curr_point - prev_point)
-      next_dist = abs(curr_point - next_point)
+      prev_dist = abs(curr_dot - prev_dot)
+      next_dist = abs(curr_dot - next_dot)
       
       # Calculate distance and angle
-      distance = min(prev_dist, next_dist)
+      angle = calculate_angle(prev_dot, curr_dot, next_dot)
+
+      if j == 0 and sample_attempts > 1: # on the first pass take average of angles
+      # if j < sample_attempts-1: # on the first pass take average of angles
+        prev_angle = calculate_angle(filtered_dots[(i - 2) % n], prev_dot, curr_dot)
+        next_angle = calculate_angle(curr_dot, next_dot, filtered_dots[(i + 2) % n])
+        angle += prev_angle + next_angle
+        angle /= 3
       
-      angle = calculate_angle(prev_point, curr_point, next_point)
-      angle_threshold_variable = angle_threshold - (5 if distance < 35 else 0)
-      
+      # Points that are further away and are on a very straight line can be removed
+      max_distance = max(prev_dist, next_dist)
+      if reduce_straights:
+        min_distance = min(prev_dist, next_dist)
+        # distance = max_distance if angle < 176 and j > 0 else (min_distance*0.7+max_distance*0.3)
+        distance = max_distance if angle < 177 and j < sample_attempts - 1 else (min_distance*0.7+max_distance*0.3)
+      else:
+        distance = max_distance
+
+      angle_threshold_variable = angle_threshold - (10 if distance < min_distance_threshold_max*0.3 else 0)
+
       # Check if point should be removed
       if (
         distance < distance_threshold
         and angle > angle_threshold_variable
       ):
         # Remove current point and restart validation
-        filtered_points.pop(i)
+        filtered_dots.pop(i)
         n -= 1
 
-  return filtered_points
+  return filtered_dots
+
+def remove_consecutive_duplicates(point_list):
+  j = 0
+  while j < len(point_list):
+    if abs(point_list[j] - point_list[(j + 1) % len(point_list)]) < 1:
+      point_list.pop(j)
+      # No need to increment j because we just removed an element at this position
+    else:
+      j += 1
+
 
 # Function to get dots from SVG or text input
-def get_dots(text=None, font=None, total_dots=100, distance_threshold=20, angle_threshold=160):
+def get_dots(text=None, font=None, total_dots=100, distance_threshold=20, angle_threshold=160, merge=True, reduce_straights=False):
   print(text)
 
   all_dots = []
   
-  # Example usage with parsed arguments
   paths = get_paths(text, font)
 
   # Calculate the length of each path and the total length
   path_lengths = [path.length() for path in paths]
   total_length = sum(path_lengths)
 
-  num_dots_per_path = [int(total_dots * (length / total_length)) for length in path_lengths]
+  num_dots_per_path = [math.ceil(total_dots * (length / total_length)) for length in path_lengths]
   # Adjust the number of dots to ensure the total matches args.dots
   while sum(num_dots_per_path) < total_dots:
       num_dots_per_path[num_dots_per_path.index(max(num_dots_per_path))] += 1
 
-  # Plot the dots and lines
-  for path, num_dots in zip(paths, num_dots_per_path):
-    dots = get_evenly_spaced_points_from_subpath(path, num_dots)
+  
+  # Example usage with parsed arguments
+  if merge:
+    all_dots = merge_paths(zip(paths, num_dots_per_path))
+  else:
 
+    # Plot the dots and lines
+    for path, num_dots in zip(paths, num_dots_per_path):
+      dots = get_evenly_spaced_dots_from_path(path, num_dots)
+
+      all_dots.append(dots)
+
+  for i, dots in enumerate(all_dots):
     if not abs(dots[-1] - dots[0]) < 1e-5:
-      dots.append(dots[0])
-        
-    
-    all_dots.append(dots)
+      all_dots[i].append(dots[0])
+    print(len(all_dots[i]))
+  
+  for i, dots in enumerate(all_dots):
 
-  def scale_dots_to_max_y(all_dots, target_extent=100):
-    all_y_coords = [dot.imag for sublist in all_dots for dot in sublist]
-    y_max, y_min = max(all_y_coords), min(all_y_coords)
-    scaling_factor = target_extent / (y_max - y_min) if y_max != y_min else 1
-    return [[dot * scaling_factor for dot in sublist] for sublist in all_dots]
-  
-  all_dots = scale_dots_to_max_y(all_dots, 1000)
-  
-  for i, dots in enumerate(all_dots):  
-    if num_dots > 3:
+    # Remove any consecutive duplicate dots
+    remove_consecutive_duplicates(all_dots[i])
+
+    if len(all_dots[i]) > 3:
     # if False:
       size_diff = len(all_dots[i])
-      all_dots[i] = remove_close_points_with_angle_updated(
-        dots, distance_threshold, 
-        angle_threshold, 
-        sample_attempts=10)
+      all_dots[i] = remove_close_dots_with_angle_updated(
+        dots, distance_threshold,
+        angle_threshold,
+        sample_attempts=5,
+        reduce_straights=reduce_straights)
       size_diff -= len(all_dots[i])
       if size_diff > 0:
         print("removed", size_diff)
 
-    j = 0
-    while j < len(all_dots[i]):
-      if abs(all_dots[i][j] - all_dots[i][(j + 1) % len(all_dots[i])]) < 1:
-        all_dots[i].pop(j)
-        # No need to increment j because we just removed an element at this position
-      else:
-        j += 1
-
-  if len(all_dots) > 1:
-    stitched_dots = stitch_dots(all_dots)
-  else:
-    stitched_dots = all_dots[0]
-    if not abs(stitched_dots[-1]-stitched_dots[0]) < 1e-5:
-      stitched_dots.append(stitched_dots[0])
+    
+  stitched_dots = stitch_dots(all_dots)
+  
+  print("total_dots", len(stitched_dots))
   
   return stitched_dots
-
-if __name__ == "__main__":
-  # Command-line argument parsing
-  parser = argparse.ArgumentParser(description="Convert an SVG file or text into a dot-to-dot representation.")
-  parser.add_argument("--svg_file", help="Path to the SVG file", default=None)
-  parser.add_argument("--text", help="Text to convert to SVG", default=None)
-  parser.add_argument("--font", help="Path to the font file (required if using text)", default=None)
-  parser.add_argument("--distance_threshold", type=int, default=20, help="Distance threshold for reducing points")
-  parser.add_argument("--angle_threshold", type=int, default=160, help="Angle factor for reducing points")
-
-  args = parser.parse_args()
-
-  fig, ax = plt.subplots()
-
-  paths = get_paths(text=args.text, font=args.font, total_dots=args.dots)
-
-  # Plot the underlying SVG
-  for path in paths:
-    mpl_path = convert_to_mpl_path(path)
-    patch = patches.PathPatch(mpl_path, facecolor='none', edgecolor='gray', lw=1, alpha=0.9)
-    ax.add_patch(patch)
-
-  all_dots = get_dots(svg_file=args.svg_file, text=args.text, font=args.font, 
-                      total_dots=args.dots, distance_threshold=args.distance_threshold,
-                      angle_threshold = args.angle_threshold)
-
-  for dots in all_dots:
-    x_coords = [dot.real for dot in dots]
-    y_coords = [-dot.imag for dot in dots]
-    
-    # Plotting the dots
-    plt.scatter(x_coords, y_coords, color='blue')
-    
-    # Plotting lines between consecutive dots
-    plt.plot(x_coords, y_coords, color='lightgreen', alpha=0.5)
-    
-    # Numbering the dots
-    for i, (x, y) in enumerate(zip(x_coords, y_coords), start=1):
-      plt.text(x, y, str(i), fontsize=8, ha='right', va='bottom', color='red')
-      
-  plt.gca().invert_yaxis()
-  plt.title("Dot-to-Dot Representation with Lines, Numbered Dots, and Underlying SVG")
-  plt.xlabel("X Coordinates")
-  plt.ylabel("Y Coordinates")
-  plt.axis('equal')
-  plt.show()
